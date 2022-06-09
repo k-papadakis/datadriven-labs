@@ -42,9 +42,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
 import pandas as pd
-import scipy.stats as st
 
-from sklearn.cluster import KMeans
 from sklearn.covariance import EllipticEnvelope
 from sklearn.neighbors import LocalOutlierFactor
 from sklearn.ensemble import IsolationForest
@@ -62,7 +60,9 @@ TURN_COLS = [
     'NewAccelX',
 ]
 
+
 # %%    
+# Load and plot the data
 df_all = pd.read_csv(DATA_PATH)
 df = df_all[TURN_COLS]
 
@@ -83,6 +83,9 @@ def plot_outliers(data, preds, mask=None, title=None):
         title=f'{title} ({len(data)} samples)'
     )
     fig.show()
+    
+fig = px.scatter_3d(df[is_sample], *TURN_COLS)
+fig.show()
 
 # %%
 # ELLIPTIC ENVELOPE
@@ -97,11 +100,11 @@ plot_outliers(
 
 # %%
 # LOCAL OUTLIER FACTOR
-lof = LocalOutlierFactor(n_neighbors=4, contamination=CONTAMINATION)
+lof = LocalOutlierFactor(n_neighbors=20, contamination=CONTAMINATION)
 lof_preds = lof.fit_predict(df)
 
 plot_outliers(
-    df, lof_preds, mask=None,
+    df, lof_preds, mask=is_sample,
     title=f'LOF (contamination={lof.contamination})'
 )
 # %%
@@ -115,17 +118,41 @@ plot_outliers(
 )
 
 # %%
-normsq = (df ** 2).sum(axis=1) ** 0.5
-time_index = pd.date_range(start='2021', periods=len(normsq), freq='1S')
-normsq = normsq.set_axis(time_index)
-normsq.name = ' + '.join(f'{col} ^ 2' for col in TURN_COLS)
+norms = (df ** 2).sum(axis=1) ** 0.5
+time_index = pd.date_range(start='2021', periods=len(norms), freq='1S')
+norms = norms.set_axis(time_index)
+norms.name = 'sqrt(' + ' + '.join(f'{col} ^ 2' for col in TURN_COLS) + ')'
 
 # %%
 # Auto-Regression
 # c is used to compute the interval where the regular values lie:
 # [Q1−c*IQR, Q3+c*IQR] where IQR=Q3−Q1 and Q1, Q3 the the 25% and 75% quantiles]
-c = 20.0
+c = 12.5  # results to about 0.01 contamination
 arad = AutoregressionAD(n_steps=10, step_size=1, c=c, side='both')
-arad_preds = arad.fit_detect(normsq)
+arad_preds = arad.fit_detect(norms)
 
-adtkplot(normsq, anomaly=arad_preds, anomaly_color="red", anomaly_tag="marker")
+adtkplot(norms, anomaly=arad_preds, anomaly_color="red", anomaly_tag="marker")
+
+# %%
+# Find Overlap
+preds = pd.DataFrame.from_dict({
+    'Eliptic Envelope': ee_preds,
+    'Local Outlier Factor': lof_preds,
+    'Isolation Forest': isfo_preds,
+    'Auto Regression': np.where(arad_preds.fillna(False), -1, 1),
+}, dtype=int)
+
+res = np.empty((preds.shape[1], preds.shape[1]), int)
+for i, col1 in enumerate(preds.columns):
+    for j, col2 in enumerate(preds.columns):
+        n_same_outliers = (preds[col1] + preds[col2] == -2).sum()
+        res[i, j] = n_same_outliers
+
+res = pd.DataFrame(res, index=preds.columns, columns=preds.columns, dtype=int)
+
+ax = sns.heatmap(res, annot=True, fmt='d', cmap='viridis')
+ax.set_title('Common Predicted Outliers')
+
+# %%
+# EXPORT RESULTS
+preds.to_csv('predictions.csv', index=False)
