@@ -49,6 +49,9 @@ from sklearn.covariance import EllipticEnvelope
 from sklearn.neighbors import LocalOutlierFactor
 from sklearn.ensemble import IsolationForest
 
+from adtk.detector import AutoregressionAD
+from adtk.visualization import plot as adtkplot
+
 
 RANDOM_STATE = 7
 CONTAMINATION = 0.01
@@ -58,8 +61,8 @@ TURN_COLS = [
     'NewRotRateZ',
     'NewAccelX',
 ]
-    
-    
+
+# %%    
 df_all = pd.read_csv(DATA_PATH)
 df = df_all[TURN_COLS]
 
@@ -112,3 +115,17 @@ plot_outliers(
 )
 
 # %%
+normsq = (df ** 2).sum(axis=1) ** 0.5
+time_index = pd.date_range(start='2021', periods=len(normsq), freq='1S')
+normsq = normsq.set_axis(time_index)
+normsq.name = ' + '.join(f'{col} ^ 2' for col in TURN_COLS)
+
+# %%
+# Auto-Regression
+# c is used to compute the interval where the regular values lie:
+# [Q1−c*IQR, Q3+c*IQR] where IQR=Q3−Q1 and Q1, Q3 the the 25% and 75% quantiles]
+c = 20.0
+arad = AutoregressionAD(n_steps=10, step_size=1, c=c, side='both')
+arad_preds = arad.fit_detect(normsq)
+
+adtkplot(normsq, anomaly=arad_preds, anomaly_color="red", anomaly_tag="marker")
