@@ -1,5 +1,4 @@
 # %%
-from random import sample
 import numpy as np
 from scipy.sparse import lil_array, csr_array, issparse
 from scipy.sparse.linalg import spsolve
@@ -45,40 +44,43 @@ def external_heat_func(x, y, mu, sigma, seed=None):
     return val
 
 
-def get_temperatures(minval, maxval, step,mu=0.05, sigma=0.005, seed=None):
+def get_temperatures(minval, maxval, step, mu=0.05, sigma=0.005, seed=None):
     xvals = yvals = np.arange(minval+step, maxval, step)  # h, 2h, ... 1-h
     x_mesh, y_mesh = np.meshgrid(xvals, yvals)
     z = external_heat_func(x_mesh, y_mesh, mu, sigma, seed=seed)
     return z.flatten(order='C')
 
 
-def solve_system(conmat, pca=None, seed=None):
-    temps = get_temperatures(0, 1, 1/40, seed=seed)
+def solve_system(conmat, temps, pca=None):
+    if temps.ndim == 1:
+        temps = np.expand_dims(temps, 0)
     
     if pca is not None:
-        temps = np.expand_dims(temps, 0)
         temps = pca.transform(temps)
-        temps = np.squeeze(temps, 0)
         
     if issparse(conmat):
-        solution = spsolve(conmat, temps)
+        solution = spsolve(conmat, temps.T)
     else:
-        solution = solve(conmat, temps)
+        solution = solve(conmat, temps.T)
+    solution = np.transpose(solution)
         
     if pca is not None:
-        solution = np.expand_dims(solution, 0)
         solution = pca.inverse_transform(solution)
+    
+    assert solution.shape[-1] == 39*39
+    solution = solution.reshape(-1, 39, 39)
+    solution = np.pad(solution, ((0, 0), (1, 1), (1, 1)))
+    
+    if solution.shape[0] == 1:
         solution = np.squeeze(solution, 0)
         
-    solution = solution.reshape(39, 39)
-    solution = np.pad(solution, ((1, 1), (1, 1)))
-    
     return solution
 
-# %%
 
+# %%
 conmat = get_connection_matrix(39, 39)
-solution = solve_system(conmat, seed=RANDOM_STATE)
+ts = get_temperatures(0, 1, 1/40, seed=RANDOM_STATE)
+solution = solve_system(conmat, ts)
 ax = sns.heatmap(solution, cmap='rocket')
 ax.invert_yaxis()
 ax.set_title('Exact Solution')
@@ -98,13 +100,16 @@ ax.set_title('Exact Solution')
 # MONTE CARLO
 def monte_carlo(n_samples, conmat, pca=None, seed=None):
     seeds = range(seed, seed+n_samples) if seed is not None else [None]*n_samples
-    mc_samples = []
+    
+    temps = []
     for i in range(n_samples):
-        solution = solve_system(conmat, pca=pca, seed=seeds[i])
-        mc_samples.append(solution)
-    return np.array(mc_samples)
+        t = get_temperatures(0, 1, 1/40, seed=seeds[i])
+        temps.append(t)
+    temps = np.array(temps)
+    
+    solutions = solve_system(conmat, temps, pca=pca)
+    return solutions
 
-# %%
 
 # assert n_samples > 39*39 = 1521
 samples = monte_carlo(10_000, conmat, seed=RANDOM_STATE)
@@ -131,7 +136,8 @@ samples_flat = samples_flat.reshape(samples.shape[0], -1)
 
 pipe = Pipeline([
     ('scaler', StandardScaler()),
-    ('pca', PCA(n_components=0.96)),
+    # ('pca', PCA(n_components=0.96)),
+    ('pca', PCA()),
 ])
 pipe.fit(samples_flat)
 
@@ -152,4 +158,5 @@ center_samples_alt = samples_alt[:, c1, c2]
 fig, axs = plt.subplots(nrows=2)
 sns.histplot(center_samples, kde=True, stat='density', ax=axs[0])
 sns.histplot(center_samples_alt, kde=True, stat='density', ax=axs[1])
+
 # %%
