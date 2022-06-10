@@ -2,9 +2,12 @@
 import numpy as np
 from scipy.sparse import lil_array
 from scipy.sparse.linalg import spsolve
+import scipy.stats as st
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+
+RANDOM_SEED = 42
 
 # %%
 def get_connection_matrix(
@@ -26,7 +29,7 @@ def get_connection_matrix(
     return conmat.tocsr()
                 
                 
-def external_heat_func(x, y, mu=0.05, sigma=0.005, seed=None):
+def external_heat_func(x, y, mu, sigma, seed=None):
     assert np.shape(x) == np.shape(y)
     shape = np.shape(x)
     rng = np.random.default_rng(seed)
@@ -37,22 +40,27 @@ def external_heat_func(x, y, mu=0.05, sigma=0.005, seed=None):
     return val
 
 
-def get_temperatures(minval, maxval, step):
+def get_temperatures(minval, maxval, step,mu=0.05, sigma=0.005, seed=None):
     xvals = yvals = np.arange(minval+step, maxval, step)  # h, 2h, ... 1-h
     x_mesh, y_mesh = np.meshgrid(xvals, yvals)
-    z = external_heat_func(x_mesh, y_mesh)
+    z = external_heat_func(x_mesh, y_mesh, mu, sigma, seed=seed)
     return z.flatten(order='C')
 
 
-conmat = get_connection_matrix(39, 39)
-temps = get_temperatures(0, 1, 1/40)
-solution = spsolve(conmat, temps)
-solution = solution.reshape(39, 39)
-solution = np.pad(solution, ((1, 1), (1, 1)))
+def exact_solve_system(conmat, seed=None):
+    temps = get_temperatures(0, 1, 1/40, seed=seed)
+    solution = spsolve(conmat, temps)
+    solution = solution.reshape(39, 39)
+    solution = np.pad(solution, ((1, 1), (1, 1)))
+    return solution
 
+
+conmat = get_connection_matrix(39, 39)
+solution = exact_solve_system(conmat, seed=RANDOM_SEED)
 ax = sns.heatmap(solution, cmap='rocket')
-# ax.set_axis_off()
+ax.invert_yaxis()
 ax.set_title('Exact Solution')
+plt.savefig('heatmap.png', facecolor='white', transparent=False)
 
 # # Compare sparse vs dense times
 # import timeit
@@ -64,6 +72,24 @@ ax.set_title('Exact Solution')
 # # 0.27s
 # # 8.93s
 
+
 # %%
+n_mc_samples = 10_000
+
+mc_samples = np.empty(n_mc_samples)
+for i in range(n_mc_samples):
+    sol = exact_solve_system(conmat)
+    # c1, c2 = (sol.shape[0] + 1) // 2, (sol.shape[1] + 1) // 2
+    mc_samples[i] = sol[21, 21]
+
+# %%
+mc_mean = mc_samples.mean()
+mc_std = mc_samples.std()
+
+ax = sns.histplot(mc_samples, kde=True, stat='density')
+ax.set_title('MC for heat at (0.5, 0.5). '
+             f'N={n_mc_samples:,}, mean={mc_mean:.2f}, stdev={mc_std:.2f}')
+# plt.savefig('montecarlo.png', facecolor='white', transparent=False)
 
 
+# %%
