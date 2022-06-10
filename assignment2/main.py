@@ -1,13 +1,18 @@
 # %%
+from random import sample
 import numpy as np
-from scipy.sparse import lil_array
+from scipy.sparse import lil_array, csr_array, issparse
 from scipy.sparse.linalg import spsolve
+from scipy.linalg import solve
 import scipy.stats as st
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 
 
-RANDOM_SEED = 42
+RANDOM_STATE = 42
 
 # %%
 def get_connection_matrix(
@@ -47,24 +52,40 @@ def get_temperatures(minval, maxval, step,mu=0.05, sigma=0.005, seed=None):
     return z.flatten(order='C')
 
 
-def exact_solve_system(conmat, seed=None):
+def solve_system(conmat, pca=None, seed=None):
     temps = get_temperatures(0, 1, 1/40, seed=seed)
-    solution = spsolve(conmat, temps)
+    
+    if pca is not None:
+        temps = np.expand_dims(temps, 0)
+        temps = pca.transform(temps)
+        temps = np.squeeze(temps, 0)
+        
+    if issparse(conmat):
+        solution = spsolve(conmat, temps)
+    else:
+        solution = solve(conmat, temps)
+        
+    if pca is not None:
+        solution = np.expand_dims(solution, 0)
+        solution = pca.inverse_transform(solution)
+        solution = np.squeeze(solution, 0)
+        
     solution = solution.reshape(39, 39)
     solution = np.pad(solution, ((1, 1), (1, 1)))
+    
     return solution
 
+# %%
 
 conmat = get_connection_matrix(39, 39)
-solution = exact_solve_system(conmat, seed=RANDOM_SEED)
+solution = solve_system(conmat, seed=RANDOM_STATE)
 ax = sns.heatmap(solution, cmap='rocket')
 ax.invert_yaxis()
 ax.set_title('Exact Solution')
-plt.savefig('heatmap.png', facecolor='white', transparent=False)
+# plt.savefig('heatmap.png', facecolor='white', transparent=False)
 
 # # Compare sparse vs dense times
 # import timeit
-# from scipy.linalg import solve
 # dense_conmat = conmat.todense()
 # sparse_time = timeit.timeit(lambda: spsolve(conmat, temps), number=100)
 # dense_time = timeit.timeit(lambda: solve(dense_conmat, temps), number=100)
@@ -74,22 +95,61 @@ plt.savefig('heatmap.png', facecolor='white', transparent=False)
 
 
 # %%
-n_mc_samples = 10_000
-
-mc_samples = np.empty(n_mc_samples)
-for i in range(n_mc_samples):
-    sol = exact_solve_system(conmat)
-    # c1, c2 = (sol.shape[0] + 1) // 2, (sol.shape[1] + 1) // 2
-    mc_samples[i] = sol[21, 21]
+# MONTE CARLO
+def monte_carlo(n_samples, conmat, pca=None, seed=None):
+    seeds = range(seed, seed+n_samples) if seed is not None else [None]*n_samples
+    mc_samples = []
+    for i in range(n_samples):
+        solution = solve_system(conmat, pca=pca, seed=seeds[i])
+        mc_samples.append(solution)
+    return np.array(mc_samples)
 
 # %%
-mc_mean = mc_samples.mean()
-mc_std = mc_samples.std()
 
-ax = sns.histplot(mc_samples, kde=True, stat='density')
+# assert n_samples > 39*39 = 1521
+samples = monte_carlo(10_000, conmat, seed=RANDOM_STATE)
+
+# %%
+c1 = (samples.shape[-2] + 1) // 2
+c2 = (samples.shape[-1] + 1) // 2
+center_samples = samples[:, c1, c2]
+
+# %%
+ax = sns.histplot(center_samples, kde=True, stat='density')
 ax.set_title('MC for heat at (0.5, 0.5). '
-             f'N={n_mc_samples:,}, mean={mc_mean:.2f}, stdev={mc_std:.2f}')
+             f'N={len(center_samples):,}, mean={center_samples.mean():.2f}, stdev={center_samples.std():.2f}')
 # plt.savefig('montecarlo.png', facecolor='white', transparent=False)
 
+# H0: "The data are normally distributed".
+# The p-value is very large and thus H0 is not rejected. 
+print(st.normaltest(center_samples))
 
+
+# %%
+samples_flat = samples[:, 1:-1, 1:-1]
+samples_flat = samples_flat.reshape(samples.shape[0], -1)
+
+pipe = Pipeline([
+    ('scaler', StandardScaler()),
+    ('pca', PCA(n_components=0.96)),
+])
+pipe.fit(samples_flat)
+
+print(f"Number of components: {pipe['pca'].n_components_}")
+print(f"Explained variance ratio: {pipe['pca'].explained_variance_ratio_.sum(): .2%}")
+# plt.plot(np.cumsum(pipe['pca'].explained_variance_ratio_))
+
+# %%
+# pipe.transform(samples_flat)
+components = pipe['pca'].components_
+conmat_red = components @ conmat @ components.T
+
+# %%
+samples_alt = monte_carlo(10_000, conmat_red, pca=pipe, seed=RANDOM_STATE)
+
+# %%
+center_samples_alt = samples_alt[:, c1, c2]
+fig, axs = plt.subplots(nrows=2)
+sns.histplot(center_samples, kde=True, stat='density', ax=axs[0])
+sns.histplot(center_samples_alt, kde=True, stat='density', ax=axs[1])
 # %%
