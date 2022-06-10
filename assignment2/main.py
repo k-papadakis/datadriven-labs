@@ -1,4 +1,5 @@
 # %%
+from typing import Optional
 import numpy as np
 from scipy.sparse import lil_array, issparse
 from scipy.sparse.linalg import spsolve
@@ -52,23 +53,22 @@ def get_temperatures(minval, maxval, step, mu=0.05, sigma=0.005, seed=None):
     return z.flatten(order='C')
 
 
-def solve_system(conmat, temps, pca=None):
-    # temps need to be column vectors
+def solve_system(conmat, temps, pca: Optional[PCA] = None):
+    if temps.ndim == 1:
+        temps = np.expand_dims(temps, 0)
+    
     if pca is not None:
-        sigma, vs = pca
-        conmat = (vs.T / sigma) @ conmat @ vs
-        temps = vs.T @ (temps.T / sigma).T
+        conmat = pca.components_ @ conmat @ pca.components_.T
+        temps = pca.transform(temps)
     
     if issparse(conmat):
-        solution = spsolve(conmat, temps)
+        solution = spsolve(conmat, temps.T)
     else:
-        solution = solve(conmat, temps)
+        solution = solve(conmat, temps.T)
+    solution = solution.T
     
     if pca is not None:
-        sigma, vs = pca
-        solution = vs @ solution
-    
-    solution = solution.T
+        solution = pca.inverse_transform(solution)
     
     assert solution.shape[-1] == 39*39
     solution = solution.reshape(-1, 39, 39)
@@ -80,7 +80,7 @@ def solve_system(conmat, temps, pca=None):
     return solution
 
 
-def monte_carlo(n_samples, conmat, pca=None, seed=None):
+def monte_carlo(n_samples, conmat, pca: Optional[PCA] = None, seed=None):
     seeds = range(seed, seed+n_samples) if seed is not None else [None]*n_samples
     
     temps = []
@@ -89,7 +89,7 @@ def monte_carlo(n_samples, conmat, pca=None, seed=None):
         temps.append(t)
     temps = np.array(temps)
     
-    solutions = solve_system(conmat, temps.T, pca=pca)
+    solutions = solve_system(conmat, temps, pca=pca)
     return solutions
 
 
@@ -116,7 +116,7 @@ ax.set_title('Exact Solution')
 # %%
 # MONTE CARLO (EXACT)
 # assert n_samples > 39*39 = 1521
-samples = monte_carlo(100_000, conmat, seed=RANDOM_STATE)
+samples = monte_carlo(20_000, conmat, seed=RANDOM_STATE)
 c1 = (samples.shape[-2] + 1) // 2
 c2 = (samples.shape[-1] + 1) // 2
 center_samples = samples[:, c1, c2]
@@ -136,10 +136,7 @@ pipe.fit(samples_flat)
 
 
 # %%
-sigma = pipe['scaler'].scale_
-vs = pipe['pca'].components_.T
-
-samples_alt = monte_carlo(100_000, conmat, pca=(sigma, vs), seed=RANDOM_STATE)
+samples_alt = monte_carlo(20_000, conmat, pca=pipe['pca'], seed=RANDOM_STATE)
 center_samples_alt = samples_alt[:, c1, c2]
 
 # %%
@@ -174,5 +171,4 @@ print(f"Explained variance ratio: {pipe['pca'].explained_variance_ratio_.sum(): 
 print(f'Normality Test for the Exact Monte Carlo: {st.normaltest(center_samples)}')
 print(f'Normality Test for the PCA Monte Carlo: {st.normaltest(center_samples_alt)}')
 
-
-
+# %%
