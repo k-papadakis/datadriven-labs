@@ -13,6 +13,7 @@ from sklearn.decomposition import PCA
 
 RANDOM_STATE = 42
 
+
 # %%
 def get_connection_matrix(
     m, n,
@@ -57,14 +58,14 @@ def solve_system(conmat, temps, pca=None):
         sigma, vs = pca
         conmat = (vs.T / sigma) @ conmat @ vs
         temps = vs.T @ (temps.T / sigma).T
-        
+    
     if issparse(conmat):
         solution = spsolve(conmat, temps)
     else:
         solution = solve(conmat, temps)
     
     if pca is not None:
-        sigma, vs
+        sigma, vs = pca
         solution = vs @ solution
     
     solution = solution.T
@@ -115,10 +116,11 @@ ax.set_title('Exact Solution')
 # %%
 # MONTE CARLO (EXACT)
 # assert n_samples > 39*39 = 1521
-samples = monte_carlo(20_000, conmat, seed=RANDOM_STATE)
+samples = monte_carlo(100_000, conmat, seed=RANDOM_STATE)
 c1 = (samples.shape[-2] + 1) // 2
 c2 = (samples.shape[-1] + 1) // 2
 center_samples = samples[:, c1, c2]
+
 
 # %%
 # MONTE CARLO (PCA)
@@ -132,10 +134,12 @@ pipe = Pipeline([
 ])
 pipe.fit(samples_flat)
 
+
+# %%
 sigma = pipe['scaler'].scale_
 vs = pipe['pca'].components_.T
 
-samples_alt = monte_carlo(20_000, conmat, pca=(sigma, vs), seed=RANDOM_STATE)
+samples_alt = monte_carlo(100_000, conmat, pca=(sigma, vs), seed=RANDOM_STATE)
 center_samples_alt = samples_alt[:, c1, c2]
 
 # %%
@@ -170,4 +174,5 @@ print(f"Explained variance ratio: {pipe['pca'].explained_variance_ratio_.sum(): 
 print(f'Normality Test for the Exact Monte Carlo: {st.normaltest(center_samples)}')
 print(f'Normality Test for the PCA Monte Carlo: {st.normaltest(center_samples_alt)}')
 
-# %%
+
+
