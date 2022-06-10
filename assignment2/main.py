@@ -1,6 +1,6 @@
 # %%
 import numpy as np
-from scipy.sparse import lil_array, csr_array, issparse
+from scipy.sparse import lil_array, issparse
 from scipy.sparse.linalg import spsolve
 from scipy.linalg import solve
 import scipy.stats as st
@@ -52,20 +52,22 @@ def get_temperatures(minval, maxval, step, mu=0.05, sigma=0.005, seed=None):
 
 
 def solve_system(conmat, temps, pca=None):
-    if temps.ndim == 1:
-        temps = np.expand_dims(temps, 0)
-    
+    # temps need to be column vectors
     if pca is not None:
-        temps = pca.transform(temps)
+        sigma, vs = pca
+        conmat = (vs.T / sigma) @ conmat @ vs
+        temps = vs.T @ (temps.T / sigma).T
         
     if issparse(conmat):
-        solution = spsolve(conmat, temps.T)
+        solution = spsolve(conmat, temps)
     else:
-        solution = solve(conmat, temps.T)
-    solution = np.transpose(solution)
-        
+        solution = solve(conmat, temps)
+    
     if pca is not None:
-        solution = pca.inverse_transform(solution)
+        sigma, vs
+        solution = vs @ solution
+    
+    solution = solution.T
     
     assert solution.shape[-1] == 39*39
     solution = solution.reshape(-1, 39, 39)
@@ -77,7 +79,21 @@ def solve_system(conmat, temps, pca=None):
     return solution
 
 
+def monte_carlo(n_samples, conmat, pca=None, seed=None):
+    seeds = range(seed, seed+n_samples) if seed is not None else [None]*n_samples
+    
+    temps = []
+    for i in range(n_samples):
+        t = get_temperatures(0, 1, 1/40, seed=seeds[i])
+        temps.append(t)
+    temps = np.array(temps)
+    
+    solutions = solve_system(conmat, temps.T, pca=pca)
+    return solutions
+
+
 # %%
+# FIND A SOLUTION OF AN INSTANCE AND DISPLAY IT
 conmat = get_connection_matrix(39, 39)
 ts = get_temperatures(0, 1, 1/40, seed=RANDOM_STATE)
 solution = solve_system(conmat, ts)
@@ -97,66 +113,61 @@ ax.set_title('Exact Solution')
 
 
 # %%
-# MONTE CARLO
-def monte_carlo(n_samples, conmat, pca=None, seed=None):
-    seeds = range(seed, seed+n_samples) if seed is not None else [None]*n_samples
-    
-    temps = []
-    for i in range(n_samples):
-        t = get_temperatures(0, 1, 1/40, seed=seeds[i])
-        temps.append(t)
-    temps = np.array(temps)
-    
-    solutions = solve_system(conmat, temps, pca=pca)
-    return solutions
-
-
+# MONTE CARLO (EXACT)
 # assert n_samples > 39*39 = 1521
-samples = monte_carlo(10_000, conmat, seed=RANDOM_STATE)
-
-# %%
+samples = monte_carlo(20_000, conmat, seed=RANDOM_STATE)
 c1 = (samples.shape[-2] + 1) // 2
 c2 = (samples.shape[-1] + 1) // 2
 center_samples = samples[:, c1, c2]
 
 # %%
-ax = sns.histplot(center_samples, kde=True, stat='density')
-ax.set_title('MC for heat at (0.5, 0.5). '
-             f'N={len(center_samples):,}, mean={center_samples.mean():.2f}, stdev={center_samples.std():.2f}')
-# plt.savefig('montecarlo.png', facecolor='white', transparent=False)
-
-# H0: "The data are normally distributed".
-# The p-value is very large and thus H0 is not rejected. 
-print(st.normaltest(center_samples))
-
-
-# %%
+# MONTE CARLO (PCA)
 samples_flat = samples[:, 1:-1, 1:-1]
 samples_flat = samples_flat.reshape(samples.shape[0], -1)
 
 pipe = Pipeline([
     ('scaler', StandardScaler()),
-    # ('pca', PCA(n_components=0.96)),
-    ('pca', PCA()),
+    ('pca', PCA(n_components=0.99)),
+    # ('pca', PCA()),
 ])
 pipe.fit(samples_flat)
 
-print(f"Number of components: {pipe['pca'].n_components_}")
-print(f"Explained variance ratio: {pipe['pca'].explained_variance_ratio_.sum(): .2%}")
-# plt.plot(np.cumsum(pipe['pca'].explained_variance_ratio_))
+sigma = pipe['scaler'].scale_
+vs = pipe['pca'].components_.T
 
-# %%
-# pipe.transform(samples_flat)
-components = pipe['pca'].components_
-conmat_red = components @ conmat @ components.T
-
-# %%
-samples_alt = monte_carlo(10_000, conmat_red, pca=pipe, seed=RANDOM_STATE)
-
-# %%
+samples_alt = monte_carlo(20_000, conmat, pca=(sigma, vs), seed=RANDOM_STATE)
 center_samples_alt = samples_alt[:, c1, c2]
-fig, axs = plt.subplots(nrows=2)
+
+# %%
+# DISPLAY RESULTS
+fig, axs = plt.subplots(nrows=2, figsize=(12, 12))
 sns.histplot(center_samples, kde=True, stat='density', ax=axs[0])
 sns.histplot(center_samples_alt, kde=True, stat='density', ax=axs[1])
+
+axs[0].set_title(
+    'Exact Solutions\n'
+    f'N={len(center_samples):,}, mean={center_samples.mean():.2f}, stdev={center_samples.std():.2f}'
+)
+axs[1].set_title(
+    'PCA Solutions\n'
+    f'N={len(center_samples_alt):,}, mean={center_samples_alt.mean():.2f}, stdev={center_samples_alt.std():.2f}'
+)
+fig.suptitle('MC for heat at (0.5, 0.5).')
+# plt.savefig('dists.png', facecolor='white', transparent=False)
+
+plt.figure()
+plt.plot(np.cumsum(pipe['pca'].explained_variance_ratio_))
+plt.xlabel('Number of Components')
+plt.ylabel('Explained Variance Ratio')
+plt.title('PCA')
+# plt.savefig('explainedvar.png', facecolor='white', transparent=False)
+
+print(f"Number of components: {pipe['pca'].n_components_}")
+print(f"Explained variance ratio: {pipe['pca'].explained_variance_ratio_.sum(): .2%}")
+
+# H0: "The data are normally distributed".
+# The p-value is very large and thus H0 is not rejected. 
+print(f'Normality Test for the Exact Monte Carlo: {st.normaltest(center_samples)}')
+print(f'Normality Test for the PCA Monte Carlo: {st.normaltest(center_samples_alt)}')
 
 # %%
