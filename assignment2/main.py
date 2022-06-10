@@ -1,6 +1,6 @@
 # %%
 import numpy as np
-from scipy.sparse import lil_array, csr_array
+from scipy.sparse import lil_array
 from scipy.sparse.linalg import spsolve
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -47,5 +47,23 @@ def get_temperatures(minval, maxval, step):
 conmat = get_connection_matrix(39, 39)
 temps = get_temperatures(0, 1, 1/40)
 solution = spsolve(conmat, temps)
-    
-        
+solution = solution.reshape(39, 39)
+solution = np.pad(solution, ((1, 1), (1, 1)))
+
+ax = sns.heatmap(solution, cmap='rocket')
+# ax.set_axis_off()
+ax.set_title('Exact Solution')
+
+# # Compare sparse vs dense times
+# import timeit
+# from scipy.linalg import solve
+# dense_conmat = conmat.todense()
+# sparse_time = timeit.timeit(lambda: spsolve(conmat, temps), number=100)
+# dense_time = timeit.timeit(lambda: solve(dense_conmat, temps), number=100)
+# print(f'Sparse Time: {sparse_time}\nDense Time: {dense_time}')
+# # 0.27s
+# # 8.93s
+
+# %%
+
+
