@@ -1,5 +1,6 @@
 # %%
 import numpy as np
+from scipy.sparse import csr_array
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -11,8 +12,8 @@ def get_connection_matrix(
     other_weight=-1.0,
     directions=((0,1), (0, -1), (1, 0), (-1, 0)),
 ):
-    conmat = np.zeros((m*n, m*n), float)
-    np.fill_diagonal(conmat, self_weight)
+    conmat = csr_array((m*n, m*n), dtype=np.float64)
+    conmat.setdiag(self_weight)
     for i in range(m):
         for j in range(n):
             for a, b in directions:
@@ -21,9 +22,10 @@ def get_connection_matrix(
                     x = i*n + j
                     y = k*n + l
                     conmat[x, y] = other_weight
-                    
     return conmat
                 
 
-conmat = get_connection_matrix(39, 39)
+conmat = get_connection_matrix(4, 4)
 
+
+# %%
