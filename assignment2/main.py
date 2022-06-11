@@ -1,5 +1,7 @@
 # %%
 from typing import Optional
+import bisect
+
 import numpy as np
 from scipy.sparse import lil_array, issparse
 from scipy.sparse.linalg import spsolve
@@ -191,12 +193,12 @@ eigvals, eigvecs = get_pca(samples_flat)
 explained_var = eigvals / np.sum(eigvals)
 explained_var_cum = np.cumsum(explained_var)
 thresh = 0.99
-n_components = 1 + np.argwhere(explained_var_cum > thresh)[0][0]
+n_components = 1 + bisect.bisect_right(explained_var_cum, 0.99)
 plot_explained_variance(explained_var_cum, n_components)
 # plt.savefig('output/explained-var.png', facecolor='white', transparent=False)
 
 # %%
-# MONETE CARLO (PCA)
+# MONTE CARLO (PCA)
 samples_alt = monte_carlo(20_000, conmat, pca=eigvecs[:, :n_components], seed=RANDOM_STATE)
 center_samples_alt = samples_alt[:, c1, c2]
 plot_exact_vs_pca(center_samples, center_samples_alt)
