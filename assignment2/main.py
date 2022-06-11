@@ -102,17 +102,17 @@ ts = get_temperatures(0, 1, 1/40, seed=RANDOM_STATE)
 solution = solve_system(conmat, ts)
 
 fig, axs = plt.subplots(ncols=2, figsize=(12, 6))
-vmin, vmax = np.min(ts), np.max(ts)
 sns.heatmap(
     np.pad(ts.reshape(39, 39), ((1,1), (1, 1))),
     cmap='rocket', square=True,
-    vmin=vmin, vmax=vmax,
+    vmin=0, vmax=np.max(ts),
     ax=axs[0]
 )
 sns.heatmap(
     solution,
     cmap='rocket', square=True,
-    vmin=vmin, vmax=vmax/20,
+    vmin=0,
+    vmax=2 / (1/np.max(solution) + 1/np.max(ts)),
     ax=axs[1]
 )
 axs[0].invert_yaxis()
