@@ -3,13 +3,10 @@ from typing import Optional
 import numpy as np
 from scipy.sparse import lil_array, issparse
 from scipy.sparse.linalg import spsolve
-from scipy.linalg import solve
+from scipy.linalg import solve, svd
 import scipy.stats as st
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
 
 
 RANDOM_STATE = 42
@@ -18,8 +15,8 @@ RANDOM_STATE = 42
 # %%
 def get_connection_matrix(
     m, n,
-    self_weight=4.0,
-    other_weight=-1.0,
+    self_weight=4.0 * 40**2,
+    other_weight=-1.0 * 40**2,
     directions=((0,1), (0, -1), (1, 0), (-1, 0)),
 ):
     conmat = lil_array((m*n, m*n), dtype=np.float64)
@@ -53,23 +50,30 @@ def get_temperatures(minval, maxval, step, mu=0.05, sigma=0.005, seed=None):
     return z.flatten(order='C')
 
 
-def solve_system(conmat, temps, pca: Optional[PCA] = None):
-    if temps.ndim == 1:
-        temps = np.expand_dims(temps, 0)
-    
+def get_pca(X):
+    n, p = X.shape
+    mean = np.mean(X, axis=0)
+    std = np.std(X, axis=0)
+    X = (X - mean) / std
+    U, S, Vt = svd(X, full_matrices=False)
+    eigvals = S**2 / (n - 1)
+    return eigvals, Vt.T
+
+
+def solve_system(conmat, temps, pca: Optional[np.ndarray] = None):
     if pca is not None:
-        conmat = pca.components_ @ conmat @ pca.components_.T
-        temps = pca.transform(temps)
+        conmat = pca.T @ conmat @ pca
+        temps = pca.T @ temps
     
     if issparse(conmat):
-        solution = spsolve(conmat, temps.T)
+        solution = spsolve(conmat, temps)
     else:
-        solution = solve(conmat, temps.T)
-    solution = solution.T
-    
+        solution = solve(conmat, temps)
+        
     if pca is not None:
-        solution = pca.inverse_transform(solution)
+        solution = pca @ solution
     
+    solution = solution.T
     assert solution.shape[-1] == 39*39
     solution = solution.reshape(-1, 39, 39)
     solution = np.pad(solution, ((0, 0), (1, 1), (1, 1)))
@@ -80,8 +84,8 @@ def solve_system(conmat, temps, pca: Optional[PCA] = None):
     return solution
 
 
-def monte_carlo(n_samples, conmat, pca: Optional[PCA] = None, seed=None):
-    seeds = range(seed, seed+n_samples) if seed is not None else [None]*n_samples
+def monte_carlo(n_samples, conmat, pca: Optional[np.ndarray] = None, seed=None):
+    seeds = range(seed, seed + n_samples) if seed is not None else [None] * n_samples
     
     temps = []
     for i in range(n_samples):
@@ -89,47 +93,79 @@ def monte_carlo(n_samples, conmat, pca: Optional[PCA] = None, seed=None):
         temps.append(t)
     temps = np.array(temps)
     
-    solutions = solve_system(conmat, temps, pca=pca)
+    solutions = solve_system(conmat, temps.T, pca=pca)
     return solutions
 
 
+def plot_solution(temps, solution):
+    fig, axs = plt.subplots(ncols=2, figsize=(12, 6))
+    
+    sns.heatmap(
+        np.pad(temps.reshape(39, 39), ((1,1), (1, 1))),
+        cmap='rocket', square=True,
+        vmin=0, vmax=np.max(temps),
+        ax=axs[0]
+    )
+    sns.heatmap(
+        solution,
+        cmap='rocket', square=True,
+        vmin=0,
+        vmax=2 / (1/np.max(solution) + 1/np.max(temps)),
+        ax=axs[1]
+    )
+    axs[0].invert_yaxis()
+    axs[1].invert_yaxis()
+    axs[0].set_title('Heat Source')
+    axs[1].set_title('Equilibrium')
+    fig.suptitle('Exact Solution')
+    
+    return axs
+
+
+def plot_explained_variance(explained_var_cum, n_components):
+    point = n_components - 1, explained_var_cum[n_components - 1]
+    
+    fig, ax = plt.subplots(figsize=(9, 6))
+    
+    ax.plot(explained_var_cum)
+    ax.plot(*point, 'ro', label=f'({point[0]+1: d}, {point[1]: .2f})')
+    ax.legend(loc='best')
+    ax.set_xlabel('Number of Components')
+    ax.set_ylabel('Explained Variance Ratio')
+    ax.set_title('PCA')
+    
+    return ax
+
+
+def plot_density(samples, title=None, ax=None):
+    if ax is None:
+        _, ax = plt.subplots()
+    
+    sns.histplot(samples, kde=True, stat='density', ax=ax)
+    ax.set_title(
+        ('' if title is None else title + ' ')
+        + f'N={len(samples):,}, '
+        f'mean={samples.mean():.2f}, '
+        f'stdev={samples.std():.2f}'
+    )
+    return ax
+
+
+def plot_exact_vs_pca(samples_exact, samples_pca):
+    fig, axs = plt.subplots(ncols=2, figsize=(12, 6))
+    plot_density(samples_exact, title='Exact Solutions', ax=axs[0])
+    plot_density(samples_pca, title=f'PCA Solutions', ax=axs[1])
+    fig.suptitle('Monte Carlo simulation of the heat equilibrium at the center.')
+    return axs
+
+
 # %%
-# FIND A SOLUTION OF AN INSTANCE AND DISPLAY IT
+# FIND THE SOLUTION OF ONE INSTANCE
 conmat = get_connection_matrix(39, 39)
-conmat /= (1/40)**2
-print(type(conmat))
-ts = get_temperatures(0, 1, 1/40, seed=RANDOM_STATE)
-solution = solve_system(conmat, ts)
-
-fig, axs = plt.subplots(ncols=2, figsize=(12, 6))
-sns.heatmap(
-    np.pad(ts.reshape(39, 39), ((1,1), (1, 1))),
-    cmap='rocket', square=True,
-    vmin=0, vmax=np.max(ts),
-    ax=axs[0]
-)
-sns.heatmap(
-    solution,
-    cmap='rocket', square=True,
-    vmin=0,
-    vmax=2 / (1/np.max(solution) + 1/np.max(ts)),
-    ax=axs[1]
-)
-axs[0].invert_yaxis()
-axs[1].invert_yaxis()
-axs[0].set_title('Heat Source')
-axs[1].set_title('Equilibrium')
-fig.suptitle('Exact Solution')
-# plt.savefig('output/heatmap.png', facecolor='white', transparent=False)
-
-# # Compare sparse vs dense times
-# import timeit
-# dense_conmat = conmat.todense()
-# sparse_time = timeit.timeit(lambda: spsolve(conmat, temps), number=100)
-# dense_time = timeit.timeit(lambda: solve(dense_conmat, temps), number=100)
-# print(f'Sparse Time: {sparse_time}\nDense Time: {dense_time}')
-# # 0.27s
-# # 8.93s
+t = get_temperatures(0, 1, 1/40, seed=RANDOM_STATE)
+solution = solve_system(conmat, t)
+plot_solution(t, solution)
+# plt.savefig('output/solution-heatmap.png', facecolor='white', transparent=False)
 
 
 # %%
@@ -138,56 +174,41 @@ fig.suptitle('Exact Solution')
 samples = monte_carlo(20_000, conmat, seed=RANDOM_STATE)
 c1 = (samples.shape[-2] + 1) // 2
 c2 = (samples.shape[-1] + 1) // 2
-center_samples = samples[:, c1, c2]
+center_samples = samples[..., c1, c2]
+plot_density(
+    center_samples,
+    title='Monte Carlo simulation of the heat equilibrium at the center.\n'
+)
+# plt.savefig('output/dist-exact.png', facecolor='white', transparent=False)
 
 
 # %%
-# MONTE CARLO (PCA)
+# PCA
 samples_flat = samples[:, 1:-1, 1:-1]
 samples_flat = samples_flat.reshape(samples.shape[0], -1)
 
-pipe = Pipeline([
-    ('scaler', StandardScaler()),
-    ('pca', PCA(n_components=0.99)),
-    # ('pca', PCA()),
-])
-pipe.fit(samples_flat)
-
+eigvals, eigvecs = get_pca(samples_flat)
+explained_var = eigvals / np.sum(eigvals)
+explained_var_cum = np.cumsum(explained_var)
+thresh = 0.99
+n_components = 1 + np.argwhere(explained_var_cum > thresh)[0][0]
+plot_explained_variance(explained_var_cum, n_components)
+# plt.savefig('output/explained-var.png', facecolor='white', transparent=False)
 
 # %%
-samples_alt = monte_carlo(20_000, conmat, pca=pipe['pca'], seed=RANDOM_STATE)
+# MONETE CARLO (PCA)
+samples_alt = monte_carlo(20_000, conmat, pca=eigvecs[:, :n_components], seed=RANDOM_STATE)
 center_samples_alt = samples_alt[:, c1, c2]
+plot_exact_vs_pca(center_samples, center_samples_alt)
+# plt.savefig('output/dists-exact-pca.png', facecolor='white', transparent=False)
 
 # %%
-# DISPLAY RESULTS
-fig, axs = plt.subplots(ncols=2, figsize=(12, 6))
-sns.histplot(center_samples, kde=True, stat='density', ax=axs[0])
-sns.histplot(center_samples_alt, kde=True, stat='density', ax=axs[1])
+plt.show()
 
-axs[0].set_title(
-    'Exact Solutions\n'
-    f'N={len(center_samples):,}, mean={center_samples.mean():.2f}, stdev={center_samples.std():.2f}'
-)
-axs[1].set_title(
-    'PCA Solutions\n'
-    f'N={len(center_samples_alt):,}, mean={center_samples_alt.mean():.2f}, stdev={center_samples_alt.std():.2f}'
-)
-fig.suptitle('Monte Carlo simulation of heat equilibrium at (0.5, 0.5).')
-# plt.savefig('output/dists.png', facecolor='white', transparent=False)
-
-plt.figure()
-plt.plot(np.cumsum(pipe['pca'].explained_variance_ratio_))
-plt.xlabel('Number of Components')
-plt.ylabel('Explained Variance Ratio')
-plt.title('PCA')
-# plt.savefig('output/explainedvar.png', facecolor='white', transparent=False)
-
-print(f"Number of components: {pipe['pca'].n_components_}")
-print(f"Explained variance ratio: {pipe['pca'].explained_variance_ratio_.sum(): .2%}")
-
+# %%
+# Normality test
 # H0: "The data are normally distributed".
 # The p-value is very large and thus H0 is not rejected. 
-print(f'Normality Test for the Exact Monte Carlo: {st.normaltest(center_samples)}')
-print(f'Normality Test for the PCA Monte Carlo: {st.normaltest(center_samples_alt)}')
+print(f'Normality Test for the Exact Monte Carlo:\n{st.normaltest(center_samples)}')
 
 # %%
