@@ -1,6 +1,4 @@
 # %%
-from typing import Optional
-
 import numpy as np
 from scipy.sparse import lil_array, issparse
 from scipy.sparse.linalg import spsolve
@@ -58,10 +56,11 @@ def get_pca(X):
     X = (X - mean) / std
     U, S, Vt = svd(X, full_matrices=False)
     eigvals = S**2 / (n - 1)
-    return eigvals, Vt.T
+    eigvecs = Vt.T
+    return eigvals, eigvecs
 
 
-def solve_system(conmat, temps, pca: Optional[np.ndarray] = None):
+def solve_system(conmat, temps, pca: None | np.ndarray = None):
     if pca is not None:
         conmat = pca.T @ conmat @ pca
         temps = pca.T @ temps
@@ -85,7 +84,7 @@ def solve_system(conmat, temps, pca: Optional[np.ndarray] = None):
     return solution
 
 
-def monte_carlo(n_samples, conmat, pca: Optional[np.ndarray] = None, seed=None):
+def monte_carlo(n_samples, conmat, pca: None | np.ndarray = None, seed=None):
     seeds = range(seed, seed + n_samples) if seed is not None else [None] * n_samples
     
     temps = []
@@ -98,7 +97,7 @@ def monte_carlo(n_samples, conmat, pca: Optional[np.ndarray] = None, seed=None):
     return solutions
 
 
-def plot_solution(temps, solution):
+def plot_solution(temps, solution, title=None):
     fig, axs = plt.subplots(ncols=2, figsize=(12, 6))
     
     sns.heatmap(
@@ -118,21 +117,21 @@ def plot_solution(temps, solution):
     axs[1].invert_yaxis()
     axs[0].set_title('Heat Source')
     axs[1].set_title('Equilibrium')
-    fig.suptitle('Exact Solution')
+    fig.suptitle(title)
     
     return axs
 
 
 def plot_explained_variance(ratio_cumsum, n_components):
-    point = n_components - 1, ratio_cumsum[n_components - 1]
+    point = n_components, ratio_cumsum[n_components - 1]
+    xs = range(1, 1 + len(ratio_cumsum))
     
     fig, ax = plt.subplots(figsize=(9, 6))
-    
-    ax.plot(ratio_cumsum)
+    ax.plot(xs, ratio_cumsum)
     ax.plot(*point, 'ro', label=f'({point[0]+1: d}, {point[1]: .2f})')
-    ax.legend(loc='best')
     ax.set_xlabel('Number of Components')
     ax.set_ylabel('Explained Variance Ratio')
+    ax.legend(loc='best')
     ax.set_title('PCA')
     
     return ax
@@ -165,7 +164,7 @@ def plot_exact_vs_pca(samples_exact, samples_pca):
 conmat = get_connection_matrix(39, 39)
 t = get_temperatures(0, 1, 1/40, seed=RANDOM_STATE)
 solution = solve_system(conmat, t)
-plot_solution(t, solution)
+plot_solution(t, solution, title='Exact Solution')
 plt.savefig('output/solution-heatmap.png', facecolor='white', transparent=False)
 
 
@@ -192,7 +191,7 @@ eigvals, eigvecs = get_pca(samples_flat)
 explained_var = eigvals / np.sum(eigvals)
 ratio_cumsum = np.cumsum(explained_var)
 thresh = 0.99
-n_components = 1 + np.searchsorted(ratio_cumsum, 0.99, side="right")
+n_components = 1 + np.searchsorted(ratio_cumsum, thresh, side="right")
 plot_explained_variance(ratio_cumsum, n_components)
 plt.savefig('output/explained-var.png', facecolor='white', transparent=False)
 
