@@ -1,6 +1,5 @@
 # %%
 from typing import Optional
-import bisect
 
 import numpy as np
 from scipy.sparse import lil_array, issparse
@@ -124,12 +123,12 @@ def plot_solution(temps, solution):
     return axs
 
 
-def plot_explained_variance(explained_var_cum, n_components):
-    point = n_components - 1, explained_var_cum[n_components - 1]
+def plot_explained_variance(ratio_cumsum, n_components):
+    point = n_components - 1, ratio_cumsum[n_components - 1]
     
     fig, ax = plt.subplots(figsize=(9, 6))
     
-    ax.plot(explained_var_cum)
+    ax.plot(ratio_cumsum)
     ax.plot(*point, 'ro', label=f'({point[0]+1: d}, {point[1]: .2f})')
     ax.legend(loc='best')
     ax.set_xlabel('Number of Components')
@@ -167,7 +166,7 @@ conmat = get_connection_matrix(39, 39)
 t = get_temperatures(0, 1, 1/40, seed=RANDOM_STATE)
 solution = solve_system(conmat, t)
 plot_solution(t, solution)
-# plt.savefig('output/solution-heatmap.png', facecolor='white', transparent=False)
+plt.savefig('output/solution-heatmap.png', facecolor='white', transparent=False)
 
 
 # %%
@@ -181,7 +180,7 @@ plot_density(
     center_samples,
     title='Monte Carlo simulation of the heat equilibrium at the center.\n'
 )
-# plt.savefig('output/dist-exact.png', facecolor='white', transparent=False)
+plt.savefig('output/dist-exact.png', facecolor='white', transparent=False)
 
 
 # %%
@@ -191,18 +190,18 @@ samples_flat = samples_flat.reshape(samples.shape[0], -1)
 
 eigvals, eigvecs = get_pca(samples_flat)
 explained_var = eigvals / np.sum(eigvals)
-explained_var_cum = np.cumsum(explained_var)
+ratio_cumsum = np.cumsum(explained_var)
 thresh = 0.99
-n_components = 1 + bisect.bisect_right(explained_var_cum, 0.99)
-plot_explained_variance(explained_var_cum, n_components)
-# plt.savefig('output/explained-var.png', facecolor='white', transparent=False)
+n_components = 1 + np.searchsorted(ratio_cumsum, 0.99, side="right")
+plot_explained_variance(ratio_cumsum, n_components)
+plt.savefig('output/explained-var.png', facecolor='white', transparent=False)
 
 # %%
 # MONTE CARLO (PCA)
 samples_alt = monte_carlo(20_000, conmat, pca=eigvecs[:, :n_components], seed=RANDOM_STATE)
-center_samples_alt = samples_alt[:, c1, c2]
-plot_exact_vs_pca(center_samples, center_samples_alt)
-# plt.savefig('output/dists-exact-pca.png', facecolor='white', transparent=False)
+center_samples_pca = samples_alt[:, c1, c2]
+plot_exact_vs_pca(center_samples, center_samples_pca)
+plt.savefig('output/dists-exact-pca.png', facecolor='white', transparent=False)
 
 # %%
 plt.show()
