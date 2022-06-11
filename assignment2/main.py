@@ -96,17 +96,31 @@ def monte_carlo(n_samples, conmat, pca: Optional[PCA] = None, seed=None):
 # %%
 # FIND A SOLUTION OF AN INSTANCE AND DISPLAY IT
 conmat = get_connection_matrix(39, 39)
+conmat /= (1/40)**2
+print(type(conmat))
 ts = get_temperatures(0, 1, 1/40, seed=RANDOM_STATE)
 solution = solve_system(conmat, ts)
 
 fig, axs = plt.subplots(ncols=2, figsize=(12, 6))
-
-sns.heatmap(np.pad(ts.reshape(39, 39), ((1,1), (1, 1))), cmap='rocket', square=True, ax=axs[0])
-sns.heatmap(solution, cmap='rocket', square=True, ax=axs[1])
+vmin, vmax = np.min(ts), np.max(ts)
+sns.heatmap(
+    np.pad(ts.reshape(39, 39), ((1,1), (1, 1))),
+    cmap='rocket', square=True,
+    vmin=vmin, vmax=vmax,
+    ax=axs[0]
+)
+sns.heatmap(
+    solution,
+    cmap='rocket', square=True,
+    vmin=vmin, vmax=vmax/20,
+    ax=axs[1]
+)
 axs[0].invert_yaxis()
 axs[1].invert_yaxis()
+axs[0].set_title('Heat Source')
+axs[1].set_title('Equilibrium')
 fig.suptitle('Exact Solution')
-# plt.savefig('heatmap.png', facecolor='white', transparent=False)
+# plt.savefig('output/heatmap.png', facecolor='white', transparent=False)
 
 # # Compare sparse vs dense times
 # import timeit
@@ -146,7 +160,7 @@ center_samples_alt = samples_alt[:, c1, c2]
 
 # %%
 # DISPLAY RESULTS
-fig, axs = plt.subplots(ncols=2, figsize=(12, 12))
+fig, axs = plt.subplots(ncols=2, figsize=(12, 6))
 sns.histplot(center_samples, kde=True, stat='density', ax=axs[0])
 sns.histplot(center_samples_alt, kde=True, stat='density', ax=axs[1])
 
@@ -158,15 +172,15 @@ axs[1].set_title(
     'PCA Solutions\n'
     f'N={len(center_samples_alt):,}, mean={center_samples_alt.mean():.2f}, stdev={center_samples_alt.std():.2f}'
 )
-fig.suptitle('MC for heat at (0.5, 0.5).')
-# plt.savefig('dists.png', facecolor='white', transparent=False)
+fig.suptitle('Monte Carlo simulation of heat equilibrium at (0.5, 0.5).')
+# plt.savefig('output/dists.png', facecolor='white', transparent=False)
 
 plt.figure()
 plt.plot(np.cumsum(pipe['pca'].explained_variance_ratio_))
 plt.xlabel('Number of Components')
 plt.ylabel('Explained Variance Ratio')
 plt.title('PCA')
-# plt.savefig('explainedvar.png', facecolor='white', transparent=False)
+# plt.savefig('output/explainedvar.png', facecolor='white', transparent=False)
 
 print(f"Number of components: {pipe['pca'].n_components_}")
 print(f"Explained variance ratio: {pipe['pca'].explained_variance_ratio_.sum(): .2%}")
